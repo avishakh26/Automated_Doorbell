@@ -267,14 +267,14 @@ def test_hand_over_face_rings_the_same_special_bell(env):
     env.run(10, [(A, "hand")])
     assert env.rings == ["mask"] and env.sec.plays == 0
     assert env.pipe.mask_alert.active
-    v = env.pipe.process(env.scene.render(), 2000.0).views[0]
+    v = env.run(0.1).views[0]
     assert v.status == "masked" and v.category == "hand/skin-tone cover"
 
 
 def test_cloth_and_mask_use_same_bell_with_other_category(env):
     env.run(5, [(A, True)])
     assert env.rings == ["mask"]
-    v = env.pipe.process(env.scene.render(), 2000.0).views[0]
+    v = env.run(0.1).views[0]
     assert v.category == "mask/cloth/object"
 
 

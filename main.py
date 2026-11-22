@@ -8,6 +8,7 @@ from doorbell.alerts import SoundPlayer
 from doorbell.config import Config
 from doorbell.dashboard import render
 from doorbell.database import VisitorDatabase
+from doorbell.detectors import load_detectors
 from doorbell.pipeline import DoorbellPipeline
 from doorbell.ringer import Ringer
 
@@ -21,7 +22,9 @@ def main():
     ringer = Ringer.create(cfg.doorbell_sound, cfg.mask_doorbell_sound)
 
     db = VisitorDatabase(cfg.csv_path)
-    pipeline = DoorbellPipeline(cfg, db, SoundPlayer.create())
+    person_det, face_det = load_detectors(cfg)   # None -> original Haar face detection
+    pipeline = DoorbellPipeline(cfg, db, SoundPlayer.create(), face_detector=face_det,
+                                person_detector=person_det)
 
     cap = cv2.VideoCapture(cfg.camera_index)
 
