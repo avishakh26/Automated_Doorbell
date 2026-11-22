@@ -48,7 +48,7 @@ def render(frame: np.ndarray, result: FrameResult, db: VisitorDatabase) -> np.nd
         x, y, w, h = v.box
         color = COLORS.get(v.status, UNKNOWN_COLOR)
         cv2.rectangle(out, (x, y), (x + w, y + h), color, 2)
-        label = {MASKED: "MASK", VISIBLE: "normal"}.get(v.status, "unknown")
+        label = {MASKED: "COVERED (" + v.category + ")", VISIBLE: "normal"}.get(v.status, v.category)
         _text(out, f"#{v.track_id} {label}", x, max(14, y - 6), 0.5, color, 1)
     y = 0
     if result.mask_active:

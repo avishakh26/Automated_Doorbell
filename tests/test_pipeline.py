@@ -11,7 +11,7 @@ from doorbell.mask import MaskDetector
 from doorbell.pipeline import DoorbellPipeline
 from doorbell.alerts import SoundPlayer
 
-SKIN, MASK_BLUE = (105, 172, 224), (220, 170, 120)
+SKIN, MASK_BLUE, LIPS = (105, 172, 224), (220, 170, 120), (110, 100, 200)
 FPS = 30
 
 
@@ -34,8 +34,13 @@ class Scene:
         f = np.full((480, 640, 3), 90, np.uint8)
         for (x, y, w, h), masked in self.faces:
             f[y:y + h, x:x + w] = SKIN
-            if masked:
+            if masked == "hand":                 # flat skin-toned hand over the lower face
+                f[y + h // 2:y + h, x:x + w] = (95, 160, 215)
+            elif masked:
                 f[y + h // 2:y + h, x:x + w] = MASK_BLUE
+            else:                                # visible mouth: red lips + dark mouth line
+                f[y + int(h * 0.70):y + int(h * 0.78), x + int(w * .35):x + int(w * .65)] = LIPS
+                f[y + int(h * 0.73):y + int(h * 0.75), x + int(w * .35):x + int(w * .65)] = (30, 30, 60)
         return f
 
     def detector(self, frame):
@@ -256,3 +261,40 @@ def test_dashboard_shows_visitor_type_and_last_ring(env):
     assert res.last_ring[0] == "mask"
     img = render(env.scene.render(), res, env.db)
     assert img.shape[1] == 980
+
+
+def test_hand_over_face_rings_the_same_special_bell(env):
+    env.run(10, [(A, "hand")])
+    assert env.rings == ["mask"] and env.sec.plays == 0
+    assert env.pipe.mask_alert.active
+    v = env.pipe.process(env.scene.render(), 2000.0).views[0]
+    assert v.status == "masked" and v.category == "hand/skin-tone cover"
+
+
+def test_cloth_and_mask_use_same_bell_with_other_category(env):
+    env.run(5, [(A, True)])
+    assert env.rings == ["mask"]
+    v = env.pipe.process(env.scene.render(), 2000.0).views[0]
+    assert v.category == "mask/cloth/object"
+
+
+def test_only_two_bell_kinds_exist(env):
+    env.run(5, [(A, "hand")])
+    env.run(4, [])
+    env.run(5, [(A, True)])
+    env.run(4, [])
+    env.run(5, [(A, False)])
+    assert set(env.rings) <= {"normal", "mask"} and env.rings == ["mask", "mask", "normal"]
+
+
+def test_hand_removed_clears_alert(env):
+    env.run(5, [(A, "hand")])
+    res = env.run(5, [(A, False)])
+    assert not res.mask_active
+
+
+def test_partially_obscured_is_unknown_partial_no_special_bell(env):
+    env.pipe.mask = MaskDetector(eye_finder=lambda g: [])       # eyes hidden / turned away
+    res = env.run(5, [(A, "hand")])
+    assert not res.mask_active and res.views[0].category == "partial"
+    assert env.rings == ["normal"]

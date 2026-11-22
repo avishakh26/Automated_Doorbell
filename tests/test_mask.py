@@ -16,6 +16,9 @@ def make_frame(lower=SKIN, upper=SKIN, brightness=1.0, size=SIZE):
     face = np.zeros((size, size, 3), np.uint8)
     face[:] = upper
     face[int(size * 0.5):] = lower
+    if lower == SKIN:   # a real visible mouth: lips + dark line
+        face[int(size * .70):int(size * .78), int(size * .35):int(size * .65)] = (110, 100, 200)
+        face[int(size * .73):int(size * .75), int(size * .35):int(size * .65)] = (30, 30, 60)
     face = np.clip(face * brightness, 0, 255).astype(np.uint8)
     frame[100:100 + size, 100:100 + size] = face
     return frame, (100, 100, size, size)
@@ -109,3 +112,22 @@ def test_filter_forget():
         flt.observe(1, MASKED)
     flt.forget(1)
     assert flt.observe(1, MASKED) == UNKNOWN
+
+
+def test_flat_skin_toned_cover_is_hand_category():
+    f, b = make_frame(lower=(95, 160, 215))      # hand: skin-toned, no mouth features
+    r = det().classify(f, b)
+    assert r.status == MASKED and r.category == "hand/skin-tone cover" and r.confidence < 0.9
+
+
+def test_visible_mouth_is_not_hand():
+    f, b = make_frame()
+    r = det().classify(f, b)
+    assert r.status == VISIBLE and r.category == "normal"
+
+
+def test_mask_colour_category_and_partial_categories():
+    f, b = make_frame(lower=MASK_BLUE)
+    assert det().classify(f, b).category == "mask/cloth/object"
+    assert det(eyes=NO_EYES).classify(f, b).category == "partial"
+    assert det().classify(f, (0, 100, SIZE, SIZE)).category == "partial"

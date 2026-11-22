@@ -34,6 +34,7 @@ class TrackView:
     status: str
     confidence: float
     reason: str
+    category: str = "unknown"
 
 
 @dataclass
@@ -93,20 +94,25 @@ class DoorbellPipeline:
             if t.visible:
                 res = self.mask.classify(frame, t.box)
                 status = self.filter.observe(t.id, res.status)
-                self._last_mask_info[t.id] = (res.confidence, res.reason)
+                self._last_mask_info[t.id] = (res.confidence, res.reason, res.category)
             else:
                 status = UNKNOWN   # not seen this frame: never assume masked
-            conf, reason = self._last_mask_info.get(t.id, (0.0, ""))
+            conf, reason, cat = self._last_mask_info.get(t.id, (0.0, "", "unknown"))
+            if status == UNKNOWN:
+                cat = cat if cat == "partial" else "unknown"
+            elif status == VISIBLE:
+                cat = "normal"
             if status == MASKED and t.visible:
                 masked_ids.append(t.id)
-            views.append(TrackView(t.id, t.box, status, conf, reason if t.visible else "not visible"))
+            views.append(TrackView(t.id, t.box, status, conf,
+                                   reason if t.visible else "not visible", cat))
 
         ring = self._decide_ring(views, now)
 
         d = self.mask_alert.update(len(masked_ids), now)
         if d.fired:
             self.db.log_event(EVENT_MASK, self._vid(masked_ids[0]), count, len(masked_ids),
-                              "face covering detected")
+                              f"face covering detected: {self._last_mask_info[masked_ids[0]][2]}")
             # The mask doorbell already announced this arrival; don't stack the siren on it.
             if d.play_sound and ring != RING_MASK:
                 self.sounds.play_security()
