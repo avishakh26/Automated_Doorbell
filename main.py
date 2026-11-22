@@ -1,44 +1,53 @@
-import cv2
-import pygame
+import logging
 import time
 
-pygame.mixer.init()
-pygame.mixer.music.load("doorbell.wav")
+import cv2
+import pygame
 
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-)
-
-cap = cv2.VideoCapture(0)
-
-ring_cooldown = 5
-last_ring_time = 0
-
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-    if len(faces) > 0:
-        current_time = time.time()
-        if current_time - last_ring_time > ring_cooldown:
-            print("Someone is at the door...")
-            pygame.mixer.music.play()
-            last_ring_time = current_time
-
-    for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0,255,0), 2)
-
-    cv2.imshow("Face detected automated Doorbell", frame)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+from doorbell.alerts import SoundPlayer
+from doorbell.config import Config
+from doorbell.dashboard import render
+from doorbell.database import VisitorDatabase
+from doorbell.pipeline import DoorbellPipeline
 
 
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    cfg = Config()
+
+    pygame.mixer.init(frequency=44100, size=-16, channels=2)
+    pygame.mixer.music.load(str(cfg.doorbell_sound))
+
+    db = VisitorDatabase(cfg.csv_path)
+    pipeline = DoorbellPipeline(cfg, db, SoundPlayer.create())
+
+    cap = cv2.VideoCapture(cfg.camera_index)
+    last_ring_time = 0
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            now = time.time()
+            result = pipeline.process(frame, now)
+
+            # Original behaviour: any face rings the doorbell, with a cooldown.
+            if len(result.faces) > 0 and now - last_ring_time > cfg.ring_cooldown:
+                print("Someone is at the door...")
+                pygame.mixer.music.play()
+                last_ring_time = now
+
+            cv2.imshow("Face detected automated Doorbell", render(frame, result, db))
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        db.close()
+
+
+if __name__ == "__main__":
+    main()
