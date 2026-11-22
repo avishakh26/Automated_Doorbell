@@ -33,7 +33,7 @@ class FakeCap:
 
 def test_main_loop_rings_doorbell_logs_and_cleans_up(tmp_path, monkeypatch):
     cfg = Config(data_dir=tmp_path)
-    cap = FakeCap(40)
+    cap = FakeCap(90)
     shown, rings = [], []
     monkeypatch.setattr(main, "Config", lambda: cfg)
     monkeypatch.setattr(cv2, "VideoCapture", lambda i: cap)
@@ -42,8 +42,10 @@ def test_main_loop_rings_doorbell_logs_and_cleans_up(tmp_path, monkeypatch):
     monkeypatch.setattr(cv2, "destroyAllWindows", lambda: None)
     monkeypatch.setattr(pipeline.HaarFaceDetector, "__call__", lambda self, f: [BOX])
     monkeypatch.setattr(pygame.mixer.music, "play", lambda *a, **k: rings.append(1))
+    clock = iter(1000.0 + i / 30 for i in range(10**6))        # simulated 30 fps clock
+    monkeypatch.setattr(main.time, "time", lambda: next(clock))
     main.main()
-    assert cap.released and len(shown) == 40 and shown[0][1] == 980
-    assert len(rings) == 1                                   # cooldown honoured
+    assert cap.released and len(shown) == 90 and shown[0][1] == 980
+    assert len(rings) == 1                                   # one ring per arrival, not per frame
     lines = cfg.csv_path.read_text().splitlines()
     assert len(lines) == 2 and ",entry," in lines[1]         # one person, one entry

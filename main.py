@@ -9,6 +9,7 @@ from doorbell.config import Config
 from doorbell.dashboard import render
 from doorbell.database import VisitorDatabase
 from doorbell.pipeline import DoorbellPipeline
+from doorbell.ringer import Ringer
 
 
 def main():
@@ -16,13 +17,12 @@ def main():
     cfg = Config()
 
     pygame.mixer.init(frequency=44100, size=-16, channels=2)
-    pygame.mixer.music.load(str(cfg.doorbell_sound))
+    ringer = Ringer.create(cfg.doorbell_sound, cfg.mask_doorbell_sound)
 
     db = VisitorDatabase(cfg.csv_path)
     pipeline = DoorbellPipeline(cfg, db, SoundPlayer.create())
 
     cap = cv2.VideoCapture(cfg.camera_index)
-    last_ring_time = 0
 
     try:
         while True:
@@ -30,14 +30,13 @@ def main():
             if not ret:
                 break
 
-            now = time.time()
-            result = pipeline.process(frame, now)
+            result = pipeline.process(frame, time.time())
 
-            # Original behaviour: any face rings the doorbell, with a cooldown.
-            if len(result.faces) > 0 and now - last_ring_time > cfg.ring_cooldown:
-                print("Someone is at the door...")
-                pygame.mixer.music.play()
-                last_ring_time = now
+            # One doorbell per new arrival: normal bell, or the mask bell if masked.
+            if result.ring:
+                print("Someone is at the door..." if result.ring == "normal"
+                      else "Someone wearing a mask is at the door...")
+                ringer.ring(result.ring)
 
             cv2.imshow("Face detected automated Doorbell", render(frame, result, db))
 

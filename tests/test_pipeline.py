@@ -47,6 +47,7 @@ def env(tmp_path):
     cfg = Config(data_dir=tmp_path)
     scene = Scene()
     multi, sec = FakeSound(), FakeSound()
+    rings = []
     db = VisitorDatabase(cfg.csv_path)
     pipe = DoorbellPipeline(cfg, db, SoundPlayer(multi, sec), scene.detector,
                             MaskDetector(eye_finder=lambda g: [1, 2]))
@@ -59,9 +60,11 @@ def env(tmp_path):
         for _ in range(int(seconds * FPS)):
             clock["t"] += 1 / FPS
             res = pipe.process(scene.render(), clock["t"])
+            if res.ring:
+                rings.append(res.ring)
         return res
 
-    yield type("E", (), dict(cfg=cfg, scene=scene, multi=multi, sec=sec, db=db, pipe=pipe, run=run))
+    yield type("E", (), dict(cfg=cfg, scene=scene, multi=multi, sec=sec, db=db, pipe=pipe, run=run, rings=rings))
     db.close()
 
 
@@ -119,7 +122,8 @@ def test_masked_face_alerts_logs_and_banner_clears(env):
     res = env.run(0.1, [(A, True)])                   # 3 frames: smoothing not yet satisfied
     assert not res.mask_active and env.sec.plays == 0
     res = env.run(3, [(A, True)])
-    assert res.mask_active and env.sec.plays == 1
+    assert res.mask_active and env.rings == ["mask"]
+    assert env.sec.plays == 0                         # mask bell announced it; no stacked siren
     assert env.multi.plays == 0
     res = env.run(1, [(A, False)])                    # mask removed, within hysteresis
     res = env.run(3, [(A, False)])
@@ -127,7 +131,7 @@ def test_masked_face_alerts_logs_and_banner_clears(env):
     rows = csv_rows(env)
     masks = [r for r in rows if r["event_type"] == "mask_alert"]
     assert len(masks) == 1 and masks[0]["timestamp"] and masks[0]["detail"]
-    assert env.sec.plays == 1                         # no spam
+    assert env.sec.plays == 0 and env.rings == ["mask"]   # no spam
 
 
 def test_visible_face_never_triggers_mask(env):
@@ -145,18 +149,21 @@ def test_unreadable_face_is_unknown_not_masked(env):
 
 def test_masked_face_turning_away_is_not_counted_masked(env):
     env.run(3, [(A, True)])
-    assert env.sec.plays == 1
+    assert env.rings == ["mask"]
     env.pipe.mask = MaskDetector(eye_finder=lambda g: [])
     res = env.run(4, [(A, True)])
     assert not res.mask_active and res.views[0].status == "unknown"
 
 
 def test_mask_cooldown_after_clear(env):
+    env.run(3, [(A, False)])                          # arrives normally (normal bell)
+    env.run(1, [(A, True)])                           # puts a mask on -> siren (no mask bell)
     env.run(3, [(A, True)])
-    env.run(3, [(A, False)])
-    env.run(3, [(A, True)])
-    assert env.sec.plays == 1                         # second alert inside 8 s cooldown
-    assert env.db.stats()["mask_total"] == 2          # but still logged
+    env.run(3, [(A, False)])                          # takes it off, clears
+    env.run(1, [(A, True)])
+    env.run(3, [(A, True)])                           # again inside 8 s cooldown
+    assert env.rings == ["normal"] and env.sec.plays == 1
+    assert env.db.stats()["mask_total"] == 2          # second still logged
 
 
 def test_state_persists_across_restart(env, tmp_path):
@@ -198,3 +205,54 @@ def test_dashboard_with_empty_database(tmp_path):
     out = render(np.zeros((480, 640, 3), np.uint8), FrameResult([], [], 0, False, False), db)
     assert out.shape == (480, 980, 3)
     db.close()
+
+
+# ------------------------------------------------------------ doorbell selection
+def test_normal_visitor_rings_normal_bell_once(env):
+    env.run(20, [(A, False)])                         # stands there 20 s
+    assert env.rings == ["normal"] and env.sec.plays == 0
+
+
+def test_masked_visitor_rings_only_mask_bell_once(env):
+    env.run(20, [(A, True)])
+    assert env.rings == ["mask"] and env.sec.plays == 0
+
+
+def test_leaving_and_returning_rings_again_with_right_bell(env):
+    env.run(3, [(A, False)])
+    env.run(4, [])
+    env.run(3, [(A, True)])
+    env.run(4, [])
+    env.run(3, [(A, False)])
+    assert env.rings == ["normal", "mask", "normal"]
+
+
+def test_group_with_one_masked_rings_single_mask_bell(env):
+    env.run(5, [(A, False), (B, True)])
+    assert env.rings == ["mask"]
+
+
+def test_group_without_masks_rings_single_normal_bell(env):
+    env.run(5, [(A, False), (B, False), (C, False)])
+    assert env.rings == ["normal"]
+
+
+def test_uncertain_visitor_gets_normal_bell_after_window_never_mask(env):
+    env.pipe.mask = MaskDetector(eye_finder=lambda g: [])      # always unknown
+    env.run(0.9, [(A, True)])
+    assert env.rings == []                                      # still deciding
+    env.run(2, [(A, True)])
+    assert env.rings == ["normal"]
+
+
+def test_late_second_arrival_gets_own_bell(env):
+    env.run(5, [(A, False)])
+    env.run(3, [(A, False), (B, True)])
+    assert env.rings == ["normal", "mask"]
+
+
+def test_dashboard_shows_visitor_type_and_last_ring(env):
+    res = env.run(3, [(A, True)])
+    assert res.last_ring[0] == "mask"
+    img = render(env.scene.render(), res, env.db)
+    assert img.shape[1] == 980

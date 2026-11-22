@@ -1,4 +1,5 @@
 """Draws the live dashboard (stats side panel, alert banners, face boxes)."""
+from datetime import datetime
 from typing import Dict, List
 
 import cv2
@@ -34,13 +35,21 @@ def _event_line(rec: Dict[str, str]) -> str:
     return f"{rec['time']}  face covering"
 
 
+def _ring_text(last):
+    if not last:
+        return "none yet"
+    kind, ts = last
+    return f"{kind.upper()} @ {datetime.fromtimestamp(ts):%H:%M:%S}"
+
+
 def render(frame: np.ndarray, result: FrameResult, db: VisitorDatabase) -> np.ndarray:
     out = frame.copy()
     for v in result.views:
         x, y, w, h = v.box
         color = COLORS.get(v.status, UNKNOWN_COLOR)
         cv2.rectangle(out, (x, y), (x + w, y + h), color, 2)
-        _text(out, f"#{v.track_id} {v.status}", x, max(14, y - 6), 0.5, color, 1)
+        label = {MASKED: "MASK", VISIBLE: "normal"}.get(v.status, "unknown")
+        _text(out, f"#{v.track_id} {label}", x, max(14, y - 6), 0.5, color, 1)
     y = 0
     if result.mask_active:
         y = _banner(out, y, "SECURITY ALERT: FACE COVERING DETECTED", (0, 0, 200))
@@ -57,7 +66,8 @@ def render(frame: np.ndarray, result: FrameResult, db: VisitorDatabase) -> np.nd
             ("Total people detected", s["total_people"]),
             ("Visitor entries today", s["entries_today"]),
             ("Multi-person events", f"{s['multi_today']} today / {s['multi_total']}"),
-            ("Mask alerts", f"{s['mask_today']} today / {s['mask_total']}")]
+            ("Mask alerts", f"{s['mask_today']} today / {s['mask_total']}"),
+            ("Last doorbell", _ring_text(result.last_ring))]
     yy = 56
     for label, val in rows:
         _text(panel, label, 12, yy)
