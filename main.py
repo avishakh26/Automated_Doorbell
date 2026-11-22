@@ -12,6 +12,7 @@ from doorbell.pipeline import DoorbellPipeline
 from doorbell.ringer import Ringer
 
 
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     cfg = Config()
